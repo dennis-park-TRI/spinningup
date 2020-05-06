@@ -12,11 +12,11 @@ def load_policy_and_env(fpath, itr='last', deterministic=False):
     """
     Load a policy from save, whether it's TF or PyTorch, along with RL env.
 
-    Not exceptionally future-proof, but it will suffice for basic uses of the 
+    Not exceptionally future-proof, but it will suffice for basic uses of the
     Spinning Up implementations.
 
     Checks to see if there's a tf1_save folder. If yes, assumes the model
-    is tensorflow and loads it that way. Otherwise, loads as if there's a 
+    is tensorflow and loads it that way. Otherwise, loads as if there's a
     PyTorch save.
     """
 
@@ -91,7 +91,7 @@ def load_tf_policy(fpath, itr, deterministic=False):
 
 def load_pytorch_policy(fpath, itr, deterministic=False):
     """ Load a pytorch policy saved with Spinning Up Logger."""
-    
+
     fname = osp.join(fpath, 'pyt_save', 'model'+itr+'.pt')
     print('\n\nLoading from %s.\n\n'%fname)
 
@@ -106,6 +106,8 @@ def load_pytorch_policy(fpath, itr, deterministic=False):
 
     return get_action
 
+import cv2
+import tempfile
 
 def run_policy(env, get_action, max_ep_len=None, num_episodes=100, render=True):
 
@@ -116,10 +118,27 @@ def run_policy(env, get_action, max_ep_len=None, num_episodes=100, render=True):
 
     logger = EpochLogger()
     o, r, d, ep_ret, ep_len, n = env.reset(), 0, False, 0, 0, 0
+
+    tmp_avi_file = tempfile.NamedTemporaryFile(suffix='.avi').name
+    first_frame_video = True
+
     while n < num_episodes:
         if render:
-            env.render()
+            # env.render()
+            V = env.render(mode='rgb_array')
             time.sleep(1e-3)
+
+            if first_frame_video:
+                video_writer = cv2.VideoWriter(
+                    filename=tmp_avi_file,
+                    fourcc=cv2.VideoWriter_fourcc(*"MJPG"),
+                    fps=float(30),
+                    frameSize=(V.shape[1], V.shape[0]),
+                    isColor=True,
+                )
+                first_frame_video = False
+            video_writer.write(V[:,:,::-1])
+
 
         a = get_action(o)
         o, r, d, _ = env.step(a)
@@ -131,6 +150,11 @@ def run_policy(env, get_action, max_ep_len=None, num_episodes=100, render=True):
             print('Episode %d \t EpRet %.3f \t EpLen %d'%(n, ep_ret, ep_len))
             o, r, d, ep_ret, ep_len = env.reset(), 0, False, 0, 0
             n += 1
+
+    video_writer.release()
+    cmd = "ffmpeg -i {:s} -c:v libx264 -crf 25 -pix_fmt yuv420p {:s}".format(tmp_avi_file, 'output.mp4')
+    os.system(cmd)
+    os.system('rm -rf {:s}'.format(tmp_avi_file))
 
     logger.log_tabular('EpRet', with_min_and_max=True)
     logger.log_tabular('EpLen', average_only=True)
@@ -147,7 +171,7 @@ if __name__ == '__main__':
     parser.add_argument('--itr', '-i', type=int, default=-1)
     parser.add_argument('--deterministic', '-d', action='store_true')
     args = parser.parse_args()
-    env, get_action = load_policy_and_env(args.fpath, 
+    env, get_action = load_policy_and_env(args.fpath,
                                           args.itr if args.itr >=0 else 'last',
                                           args.deterministic)
     run_policy(env, get_action, args.len, args.episodes, not(args.norender))
